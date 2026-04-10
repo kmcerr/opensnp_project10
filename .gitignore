@@ -1,6 +1,7 @@
 # Data directory (all inputs and outputs)
 data/*
 !data/README.md
+!data/figures/
 
 # Python
 __pycache__/

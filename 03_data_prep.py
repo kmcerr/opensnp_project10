@@ -339,11 +339,10 @@ def main():
     pipeline = pipeline[~mask_decodeme].copy()
     print(f"\n1. Dropped {len(dropped_decodeme)} deCODEme / unknown-format files")
 
-    # Filter 2: Drop FTDNA
-    mask_ftdna = pipeline['genotype_format'] == 'ftdna-illumina'
-    dropped_ftdna = pipeline[mask_ftdna].copy()
-    pipeline = pipeline[~mask_ftdna].copy()
-    print(f"2. Dropped {len(dropped_ftdna)} FTDNA-Illumina files")
+    # Filter 2: Drop FTDNA - DISABLED, now supporting FTDNA format
+    # Keep FTDNA files in pipeline with parser support
+    dropped_ftdna = pd.DataFrame(columns=pipeline.columns)  # Empty with schema
+    print(f"2. Keeping FTDNA-Illumina files (now supported)")
 
     # Filter 3: Drop tiny files
     mask_tiny = pipeline['n_data_lines'] < 1000
@@ -352,7 +351,7 @@ def main():
     print(f"3. Dropped {len(dropped_tiny)} files with <1000 data lines")
 
     # Filter 4: Keep usable formats; send others to manual review
-    usable_formats = {'23andme', 'ancestry'}
+    usable_formats = {'23andme', 'ancestry', 'ftdna-illumina', '3col'}
     mask_manual_review = ~pipeline['format_detected'].isin(usable_formats)
     manual_review = pipeline[mask_manual_review].copy()
     pipeline = pipeline[~mask_manual_review].copy()
@@ -368,7 +367,7 @@ def main():
     print("=" * 70)
     print(f"\n  Started with:                 {starting_n}")
     print(f"  Dropped deCODEme/unknown:    -{len(dropped_decodeme)}")
-    print(f"  Dropped FTDNA main-pipeline: -{len(dropped_ftdna)}")
+    print(f"  FTDNA files:                 KEPT (now supported)")
     print(f"  Dropped tiny (<1000):        -{len(dropped_tiny)}")
     print(f"  Sent to manual review:       {len(manual_review)}")
     print(f"  Remaining in main pipeline:  {len(pipeline)}")

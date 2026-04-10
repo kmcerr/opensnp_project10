@@ -68,19 +68,19 @@ def pair_category(pi_hat: float) -> str:
     Classify a pairwise relationship degree from PI_HAT.
 
     Standard thresholds:
-        >0.9  → duplicate / MZ twin
-        >0.4  → first-degree (parent-child, full siblings)
-        >0.2  → second-degree (half-siblings, grandparent, avuncular)
-        >0.125 → third-degree (first cousins)
-        else  → unrelated
+        >=0.9  → duplicate / MZ twin
+        >=0.4  → first-degree (parent-child, full siblings)
+        >=0.25 → second-degree (half-siblings, grandparent, avuncular)
+        >=0.125 → third-degree (first cousins)
+        else   → unrelated
     """
-    if pi_hat > PIHAT_DUPLICATE:
+    if pi_hat >= PIHAT_DUPLICATE:
         return "duplicate_or_mz_twin"
-    elif pi_hat > PIHAT_1ST_DEGREE:
+    elif pi_hat >= PIHAT_1ST_DEGREE:
         return "first_degree"
-    elif pi_hat > PIHAT_2ND_DEGREE:
+    elif pi_hat >= PIHAT_2ND_DEGREE:
         return "second_degree"
-    elif pi_hat > PIHAT_3RD_DEGREE:
+    elif pi_hat >= PIHAT_3RD_DEGREE:
         return "third_degree"
     else:
         return "unrelated"
@@ -167,33 +167,42 @@ def annotate_ibs(ibs_df: pd.DataFrame,
     Returns:
         Annotated DataFrame (same row count as ibs_df).
     """
-    # Ensure string IDs
+    # Ensure string IDs in IBS dataframe
     for col in ("FID1", "IID1", "FID2", "IID2"):
         if col in ibs_df.columns:
             ibs_df[col] = ibs_df[col].astype(str)
 
-    meta1 = meta_df.rename(columns={
-        "user_id": "IID1",
-        "tier0": "tier0_1",
-        "tier1": "tier1_1",
-        "raw_ancestry": "raw_ancestry_1",
-        "genotype_format": "genotype_format_1",
-    })
+    # Convert user_id to string in metadata before renaming
+    meta_df = meta_df.copy()
+    meta_df["user_id"] = meta_df["user_id"].astype(str)
 
-    meta2 = meta_df.rename(columns={
-        "user_id": "IID2",
-        "tier0": "tier0_2",
-        "tier1": "tier1_2",
-        "raw_ancestry": "raw_ancestry_2",
-        "genotype_format": "genotype_format_2",
-    })
+    # Build rename dictionary for available columns only
+    rename_map_1 = {"user_id": "IID1"}
+    rename_map_2 = {"user_id": "IID2"}
+
+    for col, suffix in [("tier0", "_1"), ("tier1", "_1"), ("raw_ancestry", "_1"),
+                        ("genotype_format", "_1")]:
+        if col in meta_df.columns:
+            rename_map_1[col] = col + suffix
+
+    for col, suffix in [("tier0", "_2"), ("tier1", "_2"), ("raw_ancestry", "_2"),
+                        ("genotype_format", "_2")]:
+        if col in meta_df.columns:
+            rename_map_2[col] = col + suffix
+
+    meta1 = meta_df.rename(columns=rename_map_1)
+    meta2 = meta_df.rename(columns=rename_map_2)
 
     annot = ibs_df.merge(meta1, on="IID1", how="left") \
                    .merge(meta2, on="IID2", how="left")
 
-    annot["same_tier0"] = annot["tier0_1"] == annot["tier0_2"]
-    annot["same_tier1"] = annot["tier1_1"] == annot["tier1_2"]
-    annot["same_format"] = annot["genotype_format_1"] == annot["genotype_format_2"]
+    # Add comparison columns only if source columns exist
+    if "tier0_1" in annot.columns and "tier0_2" in annot.columns:
+        annot["same_tier0"] = annot["tier0_1"] == annot["tier0_2"]
+    if "tier1_1" in annot.columns and "tier1_2" in annot.columns:
+        annot["same_tier1"] = annot["tier1_1"] == annot["tier1_2"]
+    if "genotype_format_1" in annot.columns and "genotype_format_2" in annot.columns:
+        annot["same_format"] = annot["genotype_format_1"] == annot["genotype_format_2"]
 
     annot = add_pair_categories(annot)
 

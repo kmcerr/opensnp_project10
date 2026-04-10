@@ -1,63 +1,19 @@
 import re
+import logging
 import pandas as pd
 
-from config import RAW_ANCESTRY_CSV, MAPPING_CSV
+from config import RAW_ANCESTRY_CSV, MAPPING_CSV, setup_logging
+from lib.ancestry_keywords import (
+    KW_EUR_NW, KW_EUR_S, KW_EUR_E, KW_EUR_C, KW_EUR_GENERAL,
+    KW_AFRICAN, KW_EAST_ASIAN, KW_SOUTH_ASIAN, KW_MIDDLE_EASTERN,
+    KW_AMERICAS, KW_OCEANIAN, KW_JEWISH,
+    SOCIAL_LABELS, VAGUE_LABELS,
+)
 
-KW_EUR_NW = [
-    "british", "english", "irish", "welsh", "scottish", "scotland",
-    "northern european", "north european", "northwestern european",
-    "northwest european", "nw european", "scandinavian", "scandinavia",
-    "scandavia", "swedish", "norwegian", "norweig", "danish", "dutch",
-    "anglo", "celtic", "viking", "huguenot", "frisian",
-    "french", "orcadian",
-]
-
-KW_EUR_S = [
-    "south european", "southern european", "mediterranean",
-    "italian", "iberian", "iberia", "maltese", "balkan",
-    "sardinian", "portugese", "portuguese", "spanish", "greek", "romanian",
-]
-
-KW_EUR_E = [
-    "eastern european", "east european", "north eastern european",
-    "ukrainian", "ukranian", "polish", "latvian", "baltic",
-    "slavic", "slovak", "sorbian", "czech", "hungarian",
-    "finnish", "finn", "russian",
-]
-
-KW_EUR_C = [
-    "german", "swiss", "austrian", "central european", "frankish", "bavaria",
-]
-
-KW_EUR_GENERAL = ["european", "europe"]
-
-KW_AFRICAN = ["african", "sub-saharan", "west african"]
-
-KW_EAST_ASIAN = [
-    "east asian", "chinese", "korean", "japanese", "vietnamese",
-    "siberian", "southeast asian",
-    "asia",
-]
-
-KW_SOUTH_ASIAN = ["south asian", "sri lankan", "pashtun"]
-
-KW_MIDDLE_EASTERN = [
-    "middle eastern", "m. eastern", "arab", "iranian",
-    "algerian", "western asian", "asia minor", "western asia",
-]
-
-KW_AMERICAS = [
-    "native american", "amerindian", "leni lenape",
-    "southern american", "panamanian",
-]
-
-KW_OCEANIAN = ["melanesia", "melanesian", "austronesian"]
-
-KW_JEWISH = ["ashkenazi", "sephardic", "jewish", "levite"]
+setup_logging()
+logger = logging.getLogger(__name__)
 
 HAPLOGROUP_RE = re.compile(r"^[A-Z]\d|^[A-Z]-[A-Z]", re.IGNORECASE)
-SOCIAL_LABELS = {"caucasian"}
-VAGUE_LABELS = {"mixed", "mixed ancestry"}
 
 
 def has_any(tl, kws):
@@ -219,7 +175,7 @@ TIER1_CORRECTIONS = [
 def main():
     raw = pd.read_csv(RAW_ANCESTRY_CSV)
     unique_values = sorted(raw["value"].str.strip().unique(), key=str.lower)
-    print(f"Unique raw ancestry values to classify: {len(unique_values)}")
+    logger.info(f"Unique raw ancestry values to classify: {len(unique_values)}")
 
     # ── Auto-classify ──
     results = []
@@ -234,43 +190,45 @@ def main():
         })
 
     mapping = pd.DataFrame(results)
-    print(f"Auto-classified {len(mapping)} unique values")
+    logger.info(f"Auto-classified {len(mapping)} unique values")
 
     # ── Apply manual corrections ──
     n_corrected = 0
     for raw_val, new_t1, new_just in TIER1_CORRECTIONS:
         mask = mapping["raw_ancestry"] == raw_val
         if mask.sum() == 0:
-            print(f"  WARNING: correction target not found: \"{raw_val[:60]}\"")
+            logger.warning(f"Correction target not found: \"{raw_val[:60]}\"")
             continue
         old_t1 = mapping.loc[mask, "tier1"].values[0]
         if old_t1 != new_t1:
             mapping.loc[mask, "tier1"] = new_t1
             mapping.loc[mask, "tier1_justification"] = new_just
             n_corrected += 1
-            print(f"  {old_t1:>15} → {new_t1:<15}  \"{raw_val[:60]}\"")
+            logger.info(f"  {old_t1:>15} → {new_t1:<15}  \"{raw_val[:60]}\"")
         else:
-            print(f"  (already correct)              \"{raw_val[:60]}\"")
+            logger.debug(f"  (already correct)              \"{raw_val[:60]}\"")
 
-    print(f"\nManual corrections applied: {n_corrected}")
+    logger.info(f"Manual corrections applied: {n_corrected}")
 
     # ── Summary ──
-    print("\n" + "=" * 60)
-    print("MAPPING SUMMARY")
-    print("=" * 60)
+    logger.info("=" * 60)
+    logger.info("MAPPING SUMMARY")
+    logger.info("=" * 60)
 
-    print(f"\nTier 0:")
-    print(mapping["tier0"].value_counts().to_string())
+    logger.info("Tier 0 distribution:")
+    for tier0, count in mapping["tier0"].value_counts().items():
+        logger.info(f"  {tier0}: {count}")
 
-    print(f"\nTier 0 × Tier 1:")
+    logger.info("\nTier 0 × Tier 1 breakdown:")
     cross = (mapping.groupby(["tier0", "tier1"]).size()
              .reset_index(name="n")
              .sort_values(["tier0", "n"], ascending=[True, False]))
-    print(cross.to_string(index=False))
+    for _, row in cross.iterrows():
+        logger.info(f"  {row['tier0']:<10} × {row['tier1']:<20}: {row['n']}")
 
     # ── Save ──
     mapping.to_csv(MAPPING_CSV, index=False)
-    print(f"\nSaved: {MAPPING_CSV}")
+    logger.info(f"Saved: {MAPPING_CSV}")
 
 
 if __name__ == "__main__":

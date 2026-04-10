@@ -17,14 +17,22 @@ from config import AUTOSOMAL_CHROMS, VALID_BASES
 
 def split_flexible(line: str):
     """
-    Split a genotype file line, trying tab first, then whitespace.
+    Split a genotype file line, trying tab first, then comma, then whitespace.
 
     Returns:
-        (fields, delimiter_mode)  where delimiter_mode is "tab" or "whitespace"
+        (fields, delimiter_mode)  where delimiter_mode is "tab", "comma", or "whitespace"
     """
+    # Try tab-delimited first
     tab_fields = line.rstrip("\n").split("\t")
     if len(tab_fields) > 1:
         return [f.strip().strip('"') for f in tab_fields], "tab"
+
+    # Try comma-delimited (handles quoted CSV like FTDNA)
+    comma_fields = line.rstrip("\n").split(",")
+    if len(comma_fields) > 1:
+        return [f.strip().strip('"') for f in comma_fields], "comma"
+
+    # Fall back to whitespace
     return [f.strip().strip('"') for f in re.split(r"\s+", line.strip())], "whitespace"
 
 
@@ -39,6 +47,11 @@ def normalize_chr(chrom: str):
     if chrom is None:
         return None
     c = str(chrom).strip().replace('"', '').lower().replace("chr", "")
+
+    # Strip leading zeros (e.g., "01" -> "1")
+    if c.isdigit():
+        c = str(int(c))
+
     if c in AUTOSOMAL_CHROMS:
         return c
     if c in {"x", "y", "xy", "mt", "m"}:
@@ -55,10 +68,10 @@ def normalize_chr_autosomal(chrom: str):
 
 
 def is_valid_rsid(snp_id: str):
-    """Check whether a SNP identifier looks like an rsID."""
+    """Check whether a SNP identifier looks like an rsID (case-insensitive)."""
     if snp_id is None:
         return False
-    return str(snp_id).strip().replace('"', '').startswith("rs")
+    return str(snp_id).strip().replace('"', '').lower().startswith("rs")
 
 
 def is_header_line(line_lower: str):
@@ -158,6 +171,45 @@ def parse_ancestry_line(fields):
     return snp_id, chrom, int(pos), a1, a2
 
 
+def parse_ftdna_illumina_line(fields):
+    """
+    Parse FTDNA-Illumina format line: rsid chr pos genotype.
+
+    FTDNA format is similar to 23andMe but may have additional columns.
+    Typical format: RSID, CHROMOSOME, POSITION, RESULT [, extra columns...]
+
+    Returns (rsid, chr, pos, allele1, allele2) or None.
+    """
+    if len(fields) < 4:
+        return None
+
+    snp_id = fields[0].strip().strip('"')
+    chrom = normalize_chr_autosomal(fields[1])
+    pos = fields[2].strip().strip('"')
+    genotype = fields[3].strip().strip('"').upper()
+
+    if not is_valid_rsid(snp_id):
+        return None
+    if chrom is None:
+        return None
+    if not pos.isdigit() or int(pos) == 0:
+        return None
+
+    # FTDNA uses various no-call representations
+    if genotype in {"", "--", "00", "-", "- -"}:
+        return None
+
+    # Handle both "AC" and "A C" formats
+    genotype = genotype.replace(" ", "")
+
+    if len(genotype) != 2:
+        return None
+    if any(base not in VALID_BASES for base in genotype):
+        return None
+
+    return snp_id, chrom, int(pos), genotype[0], genotype[1]
+
+
 # ═══════════════════════════════════════════════════════════════════
 # FILE-LEVEL OPERATIONS
 # ═══════════════════════════════════════════════════════════════════
@@ -223,8 +275,13 @@ def parse_and_write_cleaned(filepath: Path, fmt: str, out_path: Path):
         "duplicate_rsids_skipped": 0,
     }
 
-    parser = parse_23andme_line if fmt == "23andme" else (
-        parse_ancestry_line if fmt == "ancestry" else None
+    # Map formats to parsers
+    # 3col format uses 23andme parser (same structure)
+    parser = (
+        parse_23andme_line if fmt in {"23andme", "3col"} else
+        parse_ancestry_line if fmt == "ancestry" else
+        parse_ftdna_illumina_line if fmt == "ftdna-illumina" else
+        None
     )
 
     with open(filepath, "r", errors="replace") as fin, \

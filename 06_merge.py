@@ -64,7 +64,8 @@ def attempt_merge(filtered_df, out_prefix, label="merge"):
     with open(merge_list, "w") as f:
         for _, row in filtered_df.iloc[1:].iterrows():
             p = row["out_prefix"]
-            f.write(f"{p}.bed {p}.bim {p}.fam\n")
+            # PLINK 1.9 --merge-list expects just the prefix (no extensions)
+            f.write(f"{p}\n")
 
     run_plink([
         PLINK_EXEC,
